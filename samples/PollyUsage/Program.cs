@@ -17,82 +17,64 @@ using Polly.Timeout;
 
 using static System.Net.HttpStatusCode;
 
-namespace PollyUsage;
+HostApplicationBuilder appBuilder = Host.CreateApplicationBuilder(args);
 
-internal sealed class Program
+IHttpClientBuilder httpClientBuilder = appBuilder.Services.AddHttpClient<Gw2Client>(static httpClient =>
 {
-    public static async Task Main(string[] args)
+    // The default request timeout is 100 seconds, after which OperationCanceledException is thrown
+    // Consider using a Polly timeout strategy instead, and set the HttpClient.Timeout to InfiniteTimeSpan
+    httpClient.Timeout = Timeout.InfiniteTimeSpan;
+});
+
+httpClientBuilder.AddResilienceHandler(
+    "Gw2Resiliency", // Pipeline name (used for logging)
+    resiliencePipelineBuilder =>
     {
-        HostApplicationBuilder appBuilder = Host.CreateApplicationBuilder(args);
-
-        IHttpClientBuilder httpClientBuilder = appBuilder.Services.AddHttpClient<Gw2Client>(static httpClient =>
-            {
-                // The default request timeout is 100 seconds, after which OperationCanceledException is thrown
-                // Consider using a Polly timeout strategy instead, and set the HttpClient.Timeout to InfiniteTimeSpan
-                httpClient.Timeout = Timeout.InfiniteTimeSpan;
-            }
-        );
-
-        httpClientBuilder.AddResilienceHandler(
-            "Gw2Resiliency", // Pipeline name (used for logging)
-            resiliencePipelineBuilder =>
-            {
-                // Scroll down to see the Gw2Resiliency class which holds the resiliency strategies
-                resiliencePipelineBuilder
-                    .AddTimeout(
-                        Gw2Resiliency.TotalTimeoutStrategy
-                    ) // configure the total timeout for the entire request, including retries
-                    .AddRetry(
-                        Gw2Resiliency.RetryStrategy
-                    ) // configure delayed retries for  failed requests
-                    .AddCircuitBreaker(
-                        Gw2Resiliency.CircuitBreakerStrategy
-                    ) // configure blocking requests after too many failures
-                    .AddHedging(
-                        Gw2Resiliency.HedgingStrategy
-                    ) // configure hedging for slow requests and for certain errors
-                    .AddTimeout(
-                        Gw2Resiliency.AttemptTimeoutStrategy
-                    ); // configure the timeout for each individual request attempt
-            }
-        );
-
-        // Log only the failing requests to the console / terminal
-        // In Visual Studio, you can view all requests in the Output window
-        appBuilder.Logging.AddFilter<ConsoleLoggerProvider>("Polly", LogLevel.Warning);
-        appBuilder.Logging.AddFilter<ConsoleLoggerProvider>(
-            "System.Net.Http.HttpClient.Gw2Client",
-            LogLevel.Warning
-        );
-
-        IHost app = appBuilder.Build();
-
-        Gw2Client gw2 = app.Services.GetRequiredService<Gw2Client>();
-
-        PrintHeader();
-
-        // Get the trading post prices for all items in bulk
-        await foreach (ItemPrice itemPrice in gw2.Commerce.GetItemPricesBulk().ValueOnly().ConfigureAwait(false))
-        {
-            // ItemPrice contains an Id, BestBid, and BestAsk
-            // Use the ID to get the item name
-            Item item = await gw2.Items.GetItemById(itemPrice.Id).ValueOnly().ConfigureAwait(false);
-
-            PrintRow(item.Name, itemPrice.BestBid, itemPrice.BestAsk);
-        }
-
-        void PrintHeader()
-        {
-            Console.WriteLine(new string('=', 160));
-            Console.WriteLine($"| {"Item",-50} | {"Highest buyer",-50} | {"Lowest seller",-50} |");
-            Console.WriteLine(new string('=', 160));
-        }
-
-        void PrintRow(string item, Coin highestBuyer, Coin lowestSeller)
-        {
-            Console.WriteLine($"| {item,-50} | {highestBuyer,-50} | {lowestSeller,-50} |");
-        }
+        // Scroll down to see the Gw2Resiliency class which holds the resiliency strategies
+        resiliencePipelineBuilder
+        // configure the total timeout for the entire request, including retries
+        .AddTimeout(Gw2Resiliency.TotalTimeoutStrategy)
+        // configure delayed retries for failed requests
+        .AddRetry(Gw2Resiliency.RetryStrategy)
+        // configure blocking requests after too many failures
+        .AddCircuitBreaker(Gw2Resiliency.CircuitBreakerStrategy)
+        // configure hedging for slow requests and for certain errors
+        .AddHedging(Gw2Resiliency.HedgingStrategy)
+        // configure the timeout for each individual request attempt
+        .AddTimeout(Gw2Resiliency.AttemptTimeoutStrategy);
     }
+);
+
+// Log only the failing requests to the console / terminal
+// In Visual Studio, you can view all requests in the Output window
+appBuilder.Logging.AddFilter<ConsoleLoggerProvider>("Polly", LogLevel.Warning);
+appBuilder.Logging.AddFilter<ConsoleLoggerProvider>("System.Net.Http.HttpClient.Gw2Client", LogLevel.Warning);
+
+IHost app = appBuilder.Build();
+Gw2Client gw2 = app.Services.GetRequiredService<Gw2Client>();
+
+PrintHeader();
+
+// Get the trading post prices for all items in bulk
+await foreach (ItemPrice itemPrice in gw2.Commerce.GetItemPricesBulk().ValueOnly().ConfigureAwait(false))
+{
+    // ItemPrice contains an Id, BestBid, and BestAsk
+    // Use the ID to get the item name
+    Item item = await gw2.Items.GetItemById(itemPrice.Id).ValueOnly().ConfigureAwait(false);
+
+    PrintRow(item.Name, itemPrice.BestBid, itemPrice.BestAsk);
+}
+
+void PrintHeader()
+{
+    Console.WriteLine(new string('=', 160));
+    Console.WriteLine($"| {"Item",-50} | {"Highest buyer",-50} | {"Lowest seller",-50} |");
+    Console.WriteLine(new string('=', 160));
+}
+
+void PrintRow(string item, Coin highestBuyer, Coin lowestSeller)
+{
+    Console.WriteLine($"| {item,-50} | {highestBuyer,-50} | {lowestSeller,-50} |");
 }
 
 // Static class to hold the resiliency strategies
