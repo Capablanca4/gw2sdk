@@ -3,6 +3,10 @@ using System.Drawing;
 using GuildWars2;
 using GuildWars2.Hero.Equipment.Dyes;
 
+using HttpClientFactoryUsage.Samples.MemoryCache;
+using HttpClientFactoryUsage.Samples.Polly;
+using HttpClientFactoryUsage.Samples.RateLimit;
+
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -12,16 +16,24 @@ using Pastel;
 
 HostApplicationBuilder appBuilder = Host.CreateApplicationBuilder(args);
 
-// Set up the HTTP client factory
-appBuilder.Services.AddHttpClient<Gw2Client>();
-
 // Configure logging
 appBuilder.Logging.AddSimpleConsole(options =>
-    {
-        options.ColorBehavior = LoggerColorBehavior.Enabled;
-        options.SingleLine = true;
-    }
-);
+{
+    options.ColorBehavior = LoggerColorBehavior.Enabled;
+    options.SingleLine = true;
+});
+
+// Set up the HTTP client factory
+appBuilder.Services.AddHttpClient<Gw2Client>()
+    // Add a memory cache to the HTTP client pipeline, so that repeated requests for the same data are served from memory
+    .AddMemoryCache()
+    // Add a rate limiter to the HTTP client pipeline, so that requests are throttled to avoid hitting the API rate limit
+    .AddRateLimiting()
+    // Add resiliency strategies to the HTTP client pipeline using Polly
+    .AddPolly()
+    // Add resiliency strategies to the HTTP client pipeline using the standard resilience handler,
+    // which is a simplified version of the Polly-based resiliency strategies
+    .AddStandardResilienceHandler();
 
 IHost app = appBuilder.Build();
 

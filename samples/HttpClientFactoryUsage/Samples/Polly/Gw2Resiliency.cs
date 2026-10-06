@@ -1,99 +1,13 @@
-using System.Text.Json;
-
-using GuildWars2;
-using GuildWars2.Commerce.Prices;
-using GuildWars2.Items;
-
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Console;
-
 using Polly;
 using Polly.CircuitBreaker;
 using Polly.Hedging;
 using Polly.Retry;
 using Polly.Timeout;
 
-using static System.Net.HttpStatusCode;
+using System.Net;
+using System.Text.Json;
 
-namespace PollyUsage;
-
-internal sealed class Program
-{
-    public static async Task Main(string[] args)
-    {
-        HostApplicationBuilder appBuilder = Host.CreateApplicationBuilder(args);
-
-        IHttpClientBuilder httpClientBuilder = appBuilder.Services.AddHttpClient<Gw2Client>(static httpClient =>
-            {
-                // The default request timeout is 100 seconds, after which OperationCanceledException is thrown
-                // Consider using a Polly timeout strategy instead, and set the HttpClient.Timeout to InfiniteTimeSpan
-                httpClient.Timeout = Timeout.InfiniteTimeSpan;
-            }
-        );
-
-        httpClientBuilder.AddResilienceHandler(
-            "Gw2Resiliency", // Pipeline name (used for logging)
-            resiliencePipelineBuilder =>
-            {
-                // Scroll down to see the Gw2Resiliency class which holds the resiliency strategies
-                resiliencePipelineBuilder
-                    .AddTimeout(
-                        Gw2Resiliency.TotalTimeoutStrategy
-                    ) // configure the total timeout for the entire request, including retries
-                    .AddRetry(
-                        Gw2Resiliency.RetryStrategy
-                    ) // configure delayed retries for  failed requests
-                    .AddCircuitBreaker(
-                        Gw2Resiliency.CircuitBreakerStrategy
-                    ) // configure blocking requests after too many failures
-                    .AddHedging(
-                        Gw2Resiliency.HedgingStrategy
-                    ) // configure hedging for slow requests and for certain errors
-                    .AddTimeout(
-                        Gw2Resiliency.AttemptTimeoutStrategy
-                    ); // configure the timeout for each individual request attempt
-            }
-        );
-
-        // Log only the failing requests to the console / terminal
-        // In Visual Studio, you can view all requests in the Output window
-        appBuilder.Logging.AddFilter<ConsoleLoggerProvider>("Polly", LogLevel.Warning);
-        appBuilder.Logging.AddFilter<ConsoleLoggerProvider>(
-            "System.Net.Http.HttpClient.Gw2Client",
-            LogLevel.Warning
-        );
-
-        IHost app = appBuilder.Build();
-
-        Gw2Client gw2 = app.Services.GetRequiredService<Gw2Client>();
-
-        PrintHeader();
-
-        // Get the trading post prices for all items in bulk
-        await foreach (ItemPrice itemPrice in gw2.Commerce.GetItemPricesBulk().ValueOnly().ConfigureAwait(false))
-        {
-            // ItemPrice contains an Id, BestBid, and BestAsk
-            // Use the ID to get the item name
-            Item item = await gw2.Items.GetItemById(itemPrice.Id).ValueOnly().ConfigureAwait(false);
-
-            PrintRow(item.Name, itemPrice.BestBid, itemPrice.BestAsk);
-        }
-
-        void PrintHeader()
-        {
-            Console.WriteLine(new string('=', 160));
-            Console.WriteLine($"| {"Item",-50} | {"Highest buyer",-50} | {"Lowest seller",-50} |");
-            Console.WriteLine(new string('=', 160));
-        }
-
-        void PrintRow(string item, Coin highestBuyer, Coin lowestSeller)
-        {
-            Console.WriteLine($"| {item,-50} | {highestBuyer,-50} | {lowestSeller,-50} |");
-        }
-    }
-}
+namespace HttpClientFactoryUsage.Samples.Polly;
 
 // Static class to hold the resiliency strategies
 // 
@@ -124,13 +38,13 @@ internal static class Gw2Resiliency
             { Exception: HttpRequestException } => true,
             { Exception: TimeoutRejectedException } => true,
             { Exception: BrokenCircuitException } => true,
-            { Result.StatusCode: RequestTimeout } => true,
-            { Result.StatusCode: TooManyRequests } => true,
-            { Result.StatusCode: InternalServerError } => true,
-            { Result.StatusCode: BadGateway } => true,
-            { Result.StatusCode: ServiceUnavailable } => await GetText(attempt.Outcome)
+            { Result.StatusCode: HttpStatusCode.RequestTimeout } => true,
+            { Result.StatusCode: HttpStatusCode.TooManyRequests } => true,
+            { Result.StatusCode: HttpStatusCode.InternalServerError } => true,
+            { Result.StatusCode: HttpStatusCode.BadGateway } => true,
+            { Result.StatusCode: HttpStatusCode.ServiceUnavailable } => await GetText(attempt.Outcome)
                 != "API not active",
-            { Result.StatusCode: GatewayTimeout } => true,
+            { Result.StatusCode: HttpStatusCode.GatewayTimeout } => true,
 
             // Sometimes the API returns weird data, also treat as internal errors
             { Result.IsSuccessStatusCode: false, Result.Content.Headers.ContentLength: 0 } => true,
@@ -153,13 +67,13 @@ internal static class Gw2Resiliency
                     .IsCancellationRequested,
                 { Exception: HttpRequestException } => true,
                 { Exception: TimeoutRejectedException } => true,
-                { Result.StatusCode: RequestTimeout } => true,
-                { Result.StatusCode: TooManyRequests } => true,
-                { Result.StatusCode: InternalServerError } => true,
-                { Result.StatusCode: BadGateway } => true,
-                { Result.StatusCode: ServiceUnavailable } => await GetText(attempt.Outcome)
+                { Result.StatusCode: HttpStatusCode.RequestTimeout } => true,
+                { Result.StatusCode: HttpStatusCode.TooManyRequests } => true,
+                { Result.StatusCode: HttpStatusCode.InternalServerError } => true,
+                { Result.StatusCode: HttpStatusCode.BadGateway } => true,
+                { Result.StatusCode: HttpStatusCode.ServiceUnavailable } => await GetText(attempt.Outcome)
                     != "API not active",
-                { Result.StatusCode: GatewayTimeout } => true,
+                { Result.StatusCode: HttpStatusCode.GatewayTimeout } => true,
 
                 // Sometimes the API returns weird data, also treat as internal errors
                 {
@@ -186,10 +100,10 @@ internal static class Gw2Resiliency
         // Additionally, hedge certain errors which might succeed on a second attempt without waiting
         ShouldHandle = static async attempt => attempt.Outcome switch
         {
-            { Result.StatusCode: RequestTimeout } => true,
-            { Result.StatusCode: InternalServerError } => true,
-            { Result.StatusCode: BadGateway } => true,
-            { Result.StatusCode: GatewayTimeout } => true,
+            { Result.StatusCode: HttpStatusCode.RequestTimeout } => true,
+            { Result.StatusCode: HttpStatusCode.InternalServerError } => true,
+            { Result.StatusCode: HttpStatusCode.BadGateway } => true,
+            { Result.StatusCode: HttpStatusCode.GatewayTimeout } => true,
 
             // Sometimes the API returns weird data, also treat as internal errors
             { Result.IsSuccessStatusCode: false, Result.Content.Headers.ContentLength: 0 } => true,

@@ -5,7 +5,6 @@
     <Project Path="samples/HttpClientFactoryUsage/HttpClientFactoryUsage.csproj" />
     <Project Path="samples/MostVersatileMaterials/MostVersatileMaterials.csproj" />
     <Project Path="samples/Mumble/Mumble.csproj" />
-    <Project Path="samples/PollyUsage/PollyUsage.csproj" />
     <Project Path="samples/QuagganGalleria/QuagganGalleria.csproj" />
     <Project Path="samples/SpectreMarkup/SpectreMarkup.csproj" />
     <Project Path="samples/Translations/Translations.csproj" />
